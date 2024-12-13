@@ -1,0 +1,46 @@
+# Set to true if running on Openshift
+scc:
+  create: false
+
+metrics:
+  enabled: true
+  interval: 1m
+
+falcosidekick:
+  enabled: true
+  webui:
+    enabled: true
+    ingress:
+      enabled: true
+      ingressClassName: tailscale
+      hosts:
+        - host: falco.YOUR_HOST_URL
+          paths:
+            - path: /
+
+serviceMonitor:
+  create: true
+
+grafana:
+  dashboards:
+    enabled: true
+
+collectors:
+  enabled: true
+  containerd:
+    enabled: true
+    socket: /run/containerd/containerd.sock
+
+driver:
+  enabled: true
+  kind: gvisor
+  gvisor:
+    enabled: true
+    runsc:
+      path: /usr/local/bin
+      root: /run/containerd/runsc
+      config: /run/containerd/runsc/config.toml
+
+falco:
+  grpc:
+    enabled: true
