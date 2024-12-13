@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app.kubernetes.io/component: configurator
+    app.kubernetes.io/name: runsc-configure-node
+  name: runsc-configure-node
+  namespace: kube-system
+spec:
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: configurator
+      app.kubernetes.io/name: runsc-configure-node
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: configurator
+        app.kubernetes.io/name: runsc-configure-node
+      name: runsc-configure-node
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: k8s.nefast.me/runsc-configured
+                    operator: DoesNotExist
+      containers:
+        - command:
+            - bash
+            - -c
+            - |
+              set -xe
+              chroot /host /bin/bash <<"EOT"
+              setup_runsc() {
+                ARCH=$(uname -m)
+                URL=https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}
+                wget ${URL}/runsc ${URL}/runsc.sha512 \
+                    ${URL}/containerd-shim-runsc-v1 ${URL}/containerd-shim-runsc-v1.sha512
+                sha512sum -c runsc.sha512 \
+                    -c containerd-shim-runsc-v1.sha512
+                rm -f *.sha512
+                chmod a+rx runsc containerd-shim-runsc-v1
+                mv runsc containerd-shim-runsc-v1 /usr/local/bin
+                # That's a super bad way to do it, but I cba to parse the TOML and merge it properly
+                sed -i '/\[plugins\."io\.containerd\.grpc\.v1\.cri"\]/a\    default_runtime_name = "runc"' /etc/containerd/config.toml
+                cat <<EOF | sudo tee -a /etc/containerd/config.toml
+
+                        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+                          runtime_type = "io.containerd.runsc.v1"
+              EOF
+              }
+              set -xe
+              setup_runsc
+              systemctl restart containerd
+              EOT
+              kubectl label node "$NODE_NAME" k8s.nefast.me/runsc-configured=$(date +%s)
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+          image: alpine/k8s:1.25.3
+          imagePullPolicy: IfNotPresent
+          name: runsc-install
+          resources: {}
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /host
+              name: host
+      dnsPolicy: ClusterFirst
+      hostNetwork: true
+      hostPID: true
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - hostPath:
+            path: /
+            type: Directory
+          name: host
